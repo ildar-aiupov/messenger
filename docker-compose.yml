@@ -17,6 +17,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+    restart: always
 
   redis:
     image: redis:latest
@@ -28,6 +29,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
+    restart: always
 
   celery_django:
     build: ./celery_django/
@@ -47,6 +49,7 @@ services:
                     python manage.py collectstatic &&
                     cp -r /app/collected_static/. /backend_static/ &&
                     gunicorn --bind 0.0.0.0:8000 celery_django.wsgi"
+    restart: always
 
   celery_worker:
     build: ./celery_django/
@@ -56,6 +59,7 @@ services:
       redis:
         condition: service_healthy
     command: celery -A celery_django worker --loglevel=info
+    restart: always
 
   celery_beat:
     build: ./celery_django/
@@ -65,6 +69,7 @@ services:
       redis:
         condition: service_healthy
     command: celery -A celery_django beat -l info -S django_celery_beat.schedulers:DatabaseScheduler
+    restart: always
 
   nginx:
     build: ./nginx/
@@ -76,3 +81,4 @@ services:
       - static:/static
     depends_on:
       - celery_django
+    restart: always
