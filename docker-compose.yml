@@ -1,0 +1,78 @@
+version: '3'
+
+volumes:
+  pg_data:
+  static:
+
+services:
+
+  db:
+    build: ./postgres/
+    container_name: db
+    env_file: .env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "${DB_NAME}", "-U", "${POSTGRES_USER}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  celery_django:
+    build: ./celery_django/
+    container_name: celery_django
+    env_file: .env
+    depends_on:
+      db:
+        condition:
+          service_healthy
+      redis:
+        condition:
+          service_healthy
+    volumes:
+      - static:/backend_static
+    command: sh -c "python manage.py migrate &&
+                    rm -rf /app/collected_static &&
+                    python manage.py collectstatic &&
+                    cp -r /app/collected_static/. /backend_static/ &&
+                    gunicorn --bind 0.0.0.0:8000 celery_django.wsgi"
+
+  celery_worker:
+    build: ./celery_django/
+    container_name: celery_worker
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A celery_django worker --loglevel=info
+
+  celery_beat:
+    build: ./celery_django/
+    container_name: celery_beat
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A celery_django beat -l info -S django_celery_beat.schedulers:DatabaseScheduler
+
+  nginx:
+    build: ./nginx/
+    container_name: nginx
+    env_file: .env
+    ports:
+      - 80:80
+    volumes:
+      - static:/static
+    depends_on:
+      - celery_django
